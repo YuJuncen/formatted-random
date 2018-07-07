@@ -1,0 +1,4 @@
+# haskell file
+.cabal-sandbox/
+.stack-work/
+cabal.sandbox.config
