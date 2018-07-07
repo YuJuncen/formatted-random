@@ -1,5 +1,11 @@
 # Revision history for formatted-random
 
-## 0.1.0.0  -- YYYY-mm-dd
+## 0.1.0.0  -- 2018-07-07
 
-* First version. Released on an unsuspecting world.
+* 第一个版本，在纯粹的世界中觉醒。
+* 基本的子串，字符和重复。
+* 亟待添加更多……
+
+## 0.1.1.0  -- 2018-07-08
+
+* 增加了随机次数重复的功能。  

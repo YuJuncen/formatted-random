@@ -1,6 +1,5 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 module StringParser where
 
 import Text.Parsec
@@ -10,107 +9,124 @@ import Data.List(nub, (\\))
 import qualified Text.Parsec.Token as P
 import Text.Parsec.Language (haskellDef)
 
-data EscapeType c = NumAlpha | AntiNumAlpha | JustEscape c
+data EscapeType c = Printable | AntiAlpha | Aplha | AntiNum | Num | NumAlpha | AntiNumAlpha | JustEscape c
     deriving (Show, Eq)
-data RegToken c = CharRange [c] | SingalChar c | SubExpr [RegToken c] | MultiWaySubExpr [[RegToken c]]
+data RegToken c = CharRange [c] | SingalChar c | SubExpr [Tok c] | MultiWaySubExpr [[Tok c]]
     deriving (Show, Eq)
-data Suffix = Repeat Integer | RepeatRange (Integer, Integer) | Some | Many | Nil
+data Suffix = Repeat Integer | RepeatRange (Integer, Integer) | Some | Many | Nil 
+    deriving(Show, Eq)
+data Tok c = Tok {
+    getToken :: RegToken c,
+    getSuffix :: Suffix
+} deriving (Eq)
 
-suffixparser :: Parsec String () Suffix
-suffixparser = undefined
+instance Show c => Show(Tok c) where
+    show (Tok {..}) = show getToken ++ " {" ++ show getSuffix ++ "}\n"
 
-charify :: RegToken c -> IO [c]
-charify t = case t of
-    SingalChar      c -> 
-        return [c]
-
-    CharRange       cs -> do
-        c <- uniform cs
-        return [c]
-
-    SubExpr         ts -> 
-        concat <$> (sequence $ charify <$> ts)
-
-    MultiWaySubExpr tss -> do 
-        ts <- uniform tss
-        concat <$> (sequence $ charify <$> ts)
-
-instance Functor(RegToken) where
-    -- fmap :: (a -> b) -> RegToken a -> RegToken b
-    fmap f r = case r of
-        CharRange cs -> CharRange $ fmap f cs
-        SingalChar c -> SingalChar $ f c
-        SubExpr   es -> SubExpr $ fmap f <$> es
-
+-- the build-in parsers.
 lexer = P.makeTokenParser haskellDef
 integer = P.integer lexer
 braces = P.braces lexer
 parens = P.parens lexer
 brackets = P.brackets lexer
+commaSep1 = P.commaSep1 lexer
 minusSingal = char '-'
-savedChars = "\\[]~{}()|"
-intToCh :: Int -> Char
-intToCh = toEnum
-numAlpha = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
-antiNumAlpha = ['!'..'~'] \\ numAlpha
 
+-- some configures.
+simpleRiseChance = 0.7
+savedChars = "\\[]~{}()|?+"
+
+-- Escaped char range.
+-- use the printable as global char set.
+printable = [' '..'~']
+numAlpha = ['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9']
+antiNumAlpha = printable \\ numAlpha
+alpha = ['a'..'z'] ++ ['A'..'Z']
+antiAlpha = printable \\ alpha
+num = ['0'..'9']
+antiNum = printable \\ num
+
+-- parse about [<pattern>] syntax
 _tokenMerge :: [RegToken c] -> [c]
 _tokenMerge [] = []
 _tokenMerge (SingalChar c: ts) = c  :  _tokenMerge ts
 _tokenMerge (CharRange cs: ts) = cs ++ _tokenMerge ts
 _tokenMerge (_: ts)            = _tokenMerge ts
 
-wordRange :: Parsec String () [RegToken Char]
+wordRange :: Parsec String () (RegToken Char)
 wordRange = do
     lowerBound <- anyChar
     minusSingal
     upperBound <- anyChar
-    return $ [CharRange [lowerBound..upperBound]]
+    return $ CharRange [lowerBound..upperBound]
 
-singalWord :: Parsec String () [RegToken Char]
-singalWord = ((:[]) . SingalChar) <$> noneOf "-[]|"
+singalWord :: Parsec String () (RegToken Char)
+singalWord = SingalChar<$> noneOf "-[]"
 
-regRange :: Parsec String () [RegToken Char]
-regRange = ((:[]) . CharRange . nub . _tokenMerge . concat) <$> (brackets $ many (try wordRange <|> singalWord))
+regRange :: Parsec String () (RegToken Char)
+regRange = (CharRange . nub . _tokenMerge ) <$> (brackets $ many (try wordRange <|> singalWord))
 
 regRepeat :: Parsec String () Integer
 regRepeat = braces integer' where
     integer' = read <$> (many1 $ oneOf ['0'..'9'])
 
-escape :: Parsec String () [EscapeType Char]
-escape = (:[]) <$> do
+-- parse \<escape_char> syntax
+escape :: Parsec String () (EscapeType Char)
+escape = do
     char '\\'
     c <- anyChar
     return $ if 
         |c `elem` savedChars -> JustEscape c
         |c == 'w' -> NumAlpha
         |c == 'W' -> AntiNumAlpha
+        |c == 'a' -> Aplha
+        |c == 'A' -> AntiAlpha
+        |c == 'd' -> Num
+        |c == 'D' -> AntiNum
+        |c == 'p' -> Printable
     
-escapeToCharSet :: EscapeType Char -> [RegToken Char]
-escapeToCharSet e = (:[]) $ case e of
+escapeToCharSet :: EscapeType Char -> RegToken Char
+escapeToCharSet e = case e of
     JustEscape c -> SingalChar c
     NumAlpha -> CharRange numAlpha
     AntiNumAlpha -> CharRange antiNumAlpha
+    Aplha -> CharRange alpha
+    Num -> CharRange num
+    AntiAlpha -> CharRange antiAlpha
+    AntiNum -> CharRange antiNum
+    Printable -> CharRange printable
 
-attachRepeat :: Parsec String () [a] -> Parsec String () [a]
-attachRepeat p = do
-    item <- p
-    repeatTime <- many regRepeat
-    let totalRepeatTime = product repeatTime
-    return $ concat (replicate (fromInteger totalRepeatTime) item)
-    
-regRangeWithRepeat :: Parsec String () [RegToken Char]
-regRangeWithRepeat = attachRepeat regRange
+-- parse (<substr>|<substr>|...) syntax
+subExpr :: Parsec String () (RegToken Char)
+subExpr =  SubExpr <$> parens mainParser
 
-escapeWithRepeat :: Parsec String () [EscapeType Char]
-escapeWithRepeat = attachRepeat escape
+multiWaySubexpr :: Parsec String () (RegToken Char)
+multiWaySubexpr = MultiWaySubExpr <$> (parens $ sepBy mainParser (char '|'))
 
-subExpr :: Parsec String () [RegToken Char]
-subExpr =  attachRepeat $ ((:[]) . SubExpr) <$> parens simpleParser
+suffixSome :: Parsec String () Suffix
+suffixSome = char '+' >> return Some
 
-multiWaySubexpr :: Parsec String () [RegToken Char]
-multiWaySubexpr = attachRepeat $ (:[]) . MultiWaySubExpr <$> (parens $ sepBy simpleParser (char '|'))
+suffixMany :: Parsec String () Suffix
+suffixMany = char '?' >> return Many
 
-simpleParser :: Parsec String () [RegToken Char]
-simpleParser = concat <$> (many $ simpleChars <|> (concat . fmap escapeToCharSet) <$> escapeWithRepeat <|> regRangeWithRepeat <|> try subExpr <|>multiWaySubexpr) where
-    simpleChars = ((:[]) . SingalChar) <$> noneOf savedChars
+suffixRepeat :: Parsec String () Suffix
+suffixRepeat = braces innerParser where 
+    innerParser = do
+        ns <- commaSep1 integer
+        if length ns > 1 then do
+            let (lower: upper: _) = ns
+            return $ RepeatRange (lower, upper)
+        else do
+            let (n: _) = ns
+            return $ Repeat n
+
+-- main parsers
+tokenParser :: Parsec String () (Tok Char)
+tokenParser = do
+    tok <- simpleChar <|> regRange <|> (escapeToCharSet <$> escape) <|> try subExpr <|> multiWaySubexpr
+    suf <- suffixMany <|> suffixSome <|> try suffixRepeat <|> pure Nil
+    return $ Tok tok suf where
+        simpleChar = SingalChar <$> noneOf savedChars
+
+mainParser :: Parsec String () [Tok Char]
+mainParser  = many tokenParser
