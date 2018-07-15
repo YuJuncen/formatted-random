@@ -46,7 +46,7 @@ antiAlpha = printable \\ alpha
 num = ['0'..'9']
 antiNum = printable \\ num
 
--- parse about [<pattern>] syntax
+-- parse about [*pattern*] syntax
 _tokenMerge :: [RegToken c] -> [c]
 _tokenMerge [] = []
 _tokenMerge (SingalChar c: ts) = c  :  _tokenMerge ts
@@ -70,7 +70,7 @@ regRepeat :: Parsec String () Integer
 regRepeat = braces integer' where
     integer' = read <$> (many1 $ oneOf ['0'..'9'])
 
--- parse \<escape_char> syntax
+-- parse \*escape_char* syntax
 escape :: Parsec String () (EscapeType Char)
 escape = do
     char '\\'
@@ -96,7 +96,7 @@ escapeToCharSet e = case e of
     AntiNum -> CharRange antiNum
     Printable -> CharRange printable
 
--- parse (<substr>|<substr>|...) syntax
+-- parse (*substr*|*substr*|...) syntax
 subExpr :: Parsec String () (RegToken Char)
 subExpr =  SubExpr <$> parens mainParser
 
@@ -107,7 +107,7 @@ suffixSome :: Parsec String () Suffix
 suffixSome = char '+' >> return Some
 
 suffixMany :: Parsec String () Suffix
-suffixMany = char '?' >> return Many
+suffixMany = char '*' >> return Many
 
 suffixRepeat :: Parsec String () Suffix
 suffixRepeat = braces innerParser where 
