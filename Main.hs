@@ -5,6 +5,7 @@ import StringParser
 import System.Environment (getArgs)
 import Text.Parsec (parse)
 import Control.Monad.Random
+import System.IO
 
 charify :: MonadRandom m => Tok c -> m [c]
 charify (Tok {..}) = concat <$> do
@@ -58,6 +59,7 @@ mainInteract = do
 main :: IO ()
 main = do
     args <- getArgs
+    hSetBuffering stdout NoBuffering
     case args of
         [] -> putStr noInputMessage >> forever mainInteract
         _ ->  forM args (\l -> mkRandomSyntax l >>= putStrLn) >> return ()
